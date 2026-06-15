@@ -33,6 +33,7 @@ canvas.inverted{
 <div id="bg"></div>
 <canvas id="c"></canvas>
 <script>
+<script>
 // ---------------- CONFIG ----------------
 const FRAME_COUNT = 12;
 const FRAME_DURATION = 60;
@@ -51,44 +52,64 @@ function resize(){
 resize();
 addEventListener('resize', resize);
 
-// ---------------- IMGS ----------------
+// ---------------- SAFE ASSET LOADER ----------------
 function pad(n){ return String(n).padStart(2,'0'); }
 
 function loadGroup(name){
-  let arr = [];
-  for(let i=1;i<=FRAME_COUNT;i++){
-    let img = new Image();
-    img.src = `./starr/assets/${name}/${name}_${pad(i)}.png`;
-    arr.push(img);
-  }
-  return arr;
-}
+  return new Promise((resolve) => {
+    const arr = [];
+    let loaded = 0;
 
-const groupA = loadGroup('a');
-const groupB = loadGroup('b');
-const groups = [groupA, groupB];
+    for(let i=1;i<=FRAME_COUNT;i++){
+      const img = new Image();
+
+      const src = `./assets/${name}/${name}_${pad(i)}.png`;
+      img.src = src;
+
+      img.onload = () => {
+        loaded++;
+        if(loaded === FRAME_COUNT){
+          console.log(`✔ Loaded group: ${name}`);
+          resolve(arr);
+        }
+      };
+
+      img.onerror = () => {
+        console.error(`❌ Failed to load: ${src}`);
+      };
+
+      arr.push(img);
+    }
+  });
+}
 
 // ---------------- STAR ----------------
 class Star{
-  constructor(x,y){
+  constructor(x,y,frames){
     this.x = x;
     this.y = y;
     this.size = STAR_MIN_SIZE + Math.random()*(STAR_MAX_SIZE-STAR_MIN_SIZE);
-    this.frames = groups[Math.floor(Math.random()*groups.length)];
+    this.frames = frames;
     this.start = performance.now();
     this.dead = false;
   }
+
   update(){
-    let t = performance.now() - this.start;
-    let idx = Math.floor(t / FRAME_DURATION);
+    const t = performance.now() - this.start;
+    const idx = Math.floor(t / FRAME_DURATION);
+
     if(idx >= this.frames.length){
       this.dead = true;
+      return;
     }
+
     this.frame = idx;
   }
+
   draw(){
-    let img = this.frames[Math.min(this.frame, this.frames.length-1)];
-    if(!img) return;
+    const img = this.frames[this.frame];
+    if(!img || !img.complete) return;
+
     ctx.drawImage(
       img,
       this.x - this.size/2,
@@ -99,77 +120,88 @@ class Star{
   }
 }
 
+// ---------------- STATE ----------------
 let stars = [];
-
-// ---------------- STATES ----------------
 let pointerDown = false;
 let spaceHeld = false;
 let invert = 0;
 
+let groupA = null;
+let groupB = null;
+
 // ---------------- INPUT ----------------
-canvas.addEventListener("pointerdown",(e)=>{
-  pointerDown = true;
-  const rect = canvas.getBoundingClientRect();
+window.addEventListener("pointerdown",(e)=>{
+  if(!groupA || !groupB) return; // block until ready
+
+  const frames = Math.random() > 0.5 ? groupA : groupB;
+
   stars.push(
-    new Star(
-      e.clientX - rect.left,
-      e.clientY - rect.top
-    )
+    new Star(e.clientX, e.clientY, frames)
   );
 });
 
-window.addEventListener("pointerup",()=>{
-  pointerDown = false;
-});
-
 window.addEventListener("keydown",(e)=>{
-  if(e.code === "Space"){
-    spaceHeld = true;
-  }
+  if(e.code === "Space") spaceHeld = true;
 });
 
 window.addEventListener("keyup",(e)=>{
-  if(e.code === "Space"){
-    spaceHeld = false;
-  }
+  if(e.code === "Space") spaceHeld = false;
 });
 
-// ---------------- LOOP ----------------
+// ---------------- RENDER LOOP ----------------
 function loop(){
   requestAnimationFrame(loop);
+
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  // smooth fade
-  let target = spaceHeld ? 1 : 0;
-  invert += (target - invert) * 0.08; // slower = longer fade
-  if(Math.abs(target - invert) < 0.002) invert = target; // snap to fully resolve
+  const target = spaceHeld ? 1 : 0;
+  invert += (target - invert) * 0.08;
 
-  // stars invert
   canvas.classList.toggle('inverted', invert > 0.5);
 
-  // background fade
-  let bg = 255 - invert * 255;
+  const bg = 255 - invert * 255;
   bgDiv.style.background = `rgb(${bg},${bg},${bg})`;
 
-  if(invert > 0.5 && Math.random() < 0.06){
+  // spawn ambient stars
+  if(groupA && invert > 0.5 && Math.random() < 0.06){
+    const frames = Math.random() > 0.5 ? groupA : groupB;
+
     stars.push(
       new Star(
         Math.random()*canvas.width,
-        Math.random()*canvas.height
+        Math.random()*canvas.height,
+        frames
       )
     );
   }
 
-  // update + draw
+  // update/draw
   for(let i=stars.length-1;i>=0;i--){
     stars[i].update();
     stars[i].draw();
+
     if(stars[i].dead){
       stars.splice(i,1);
     }
   }
 }
-loop();
+
+// ---------------- BOOT SYSTEM (IMPORTANT) ----------------
+async function init(){
+  console.log("⏳ Loading assets...");
+
+  [groupA, groupB] = await Promise.all([
+    loadGroup('a'),
+    loadGroup('b')
+  ]);
+
+  console.log("🚀 All assets loaded. Starting loop.");
+
+  loop();
+}
+
+init();
+</script>
 </script>
 </body>
 </html>
